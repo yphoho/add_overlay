@@ -167,6 +167,12 @@ cython_debug/
 *.aux
 *.out
 
-gopro
+*.jpg
+*.JPG
+*.mp4
+*.MP4
+
+*.csv
 *.fit
 *.gpx
+gopro
