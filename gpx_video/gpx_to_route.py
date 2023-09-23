@@ -2,26 +2,53 @@
 
 import sys
 
+import pathlib
 import argparse
-from datetime import datetime, timedelta
-from collections import defaultdict
+import functools
 
 import subprocess
 
-from geopy.distance import geodesic
-
-from PIL import Image, ImageDraw, ExifTags
 import geotiler
 
+from PIL import Image, ImageDraw
+
 import loading
+from util import PhotoRender, fix_mars_in_china
+
+
+def my_render_map(is_cache=True):
+    if not is_cache:
+        return geotiler.render_map
+
+    from sqlitedict import SqliteDict
+
+    def sqlite_downloader(db: SqliteDict, timeout=3600*24*30):
+        from geotiler.cache import caching_downloader
+        from geotiler.tile.io import fetch_tiles
+
+        def get_key(key):
+            return db.get(key, None)
+
+        def set_key(key, value):
+            if value:
+                db.setdefault(key, value)
+
+        return functools.partial(caching_downloader, get_key, set_key, fetch_tiles)
+
+    db = SqliteDict(filename=str(args.cache_dir.joinpath("tilecache.sqlite")), autocommit=True)
+    downloader = sqlite_downloader(db)
+    return functools.partial(geotiler.render_map, downloader=downloader)
 
 
 def load_gps_point(filename, num_p):
     timestamps, positions = loading.load_gps_data(filename)
+
     # print(timestamps[0].timestamp(), type(timestamps[0]))
     print('origin gps num:', len(positions))
 
     # positions = positions[int(len(positions)/2):]
+
+    num_p = max(num_p, len(positions) // 4)
 
     r = 1.0 * len(positions) / num_p
     new_positions = [positions[int(r*i)] for i in range(num_p)]
@@ -30,67 +57,6 @@ def load_gps_point(filename, num_p):
     new_timestamps.append(timestamps[-1])
 
     return new_timestamps, new_positions
-
-
-def place_photo(photo_string, timestamp_list, location_list):
-    def get_photo_location(photo):
-        with Image.open(photo) as im:
-            exif = im.getexif()
-            gps_ifd = exif.get_ifd(ExifTags.IFD.GPSInfo)
-            if not gps_ifd: return None
-
-            dt = datetime.strptime(exif[ExifTags.Base.DateTime], '%Y:%m:%d %H:%M:%S').replace(tzinfo=loading.tzinfo)
-            lon = gps_ifd[ExifTags.GPS.GPSLongitude]
-            lat = gps_ifd[ExifTags.GPS.GPSLatitude]
-            return dt, sum([x / (60 ** i) for i, x in enumerate(lon)]), sum([x / (60 ** i) for i, x in enumerate(lat)])
-
-    photo_location_index = defaultdict(list)
-
-    if photo_string is None: return photo_location_index
-
-    for photo in photo_string.split(','):
-        xxxx = get_photo_location(photo)
-        if xxxx is None : continue
-
-        p_dt, p_lon, p_lat = xxxx
-        if p_dt+timedelta(hours=1) < timestamp_list[0] or p_dt-timedelta(hours=1) > timestamp_list[-1]: continue
-
-        for i, t in enumerate(timestamp_list):
-            if t >= p_dt: break
-
-        if geodesic((p_lat, p_lon), reversed(location_list[i])).km > 1.0: continue
-
-        photo_location_index[i].append(photo)
-
-        # dist_list = [(p_lon - x) ** 2 + (p_lat - y) ** 2 for t, (x, y) in zip(timestamp_list, location_list) if p_dt > t]
-        # if dist_list:
-        #     idx = dist_list.index(min(dist_list))
-        # else:
-        #     idx = 0
-        # photo_location_index[idx].append(photo)
-
-        # min_i, min_v = -1, 0
-        # for i, (t, (x, y)) in enumerate(zip(timestamp_list, location_list)):
-        #     v = (p_lon - x) ** 2 + (p_lat - y) ** 2
-        #     # print(i, min_i, v, min_v)
-
-        #     if min_i == -1: min_i, min_v = i, v
-        #     if t >= p_dt: break
-        #     if v < min_v: min_i, min_v = i, v
-        # photo_location_index[min_i].append(photo)
-
-
-    return photo_location_index
-
-
-def draw_camera_icon(mm, map_image, location_list, photo_location_index, icon='./icon/c3.png'):
-    bg = Image.new('RGBA', map_image.size)
-    with Image.open(icon) as im:
-        for i in photo_location_index.keys():
-            x, y = mm.rev_geocode(location_list[i])
-            bg.paste(im, (int(x-im.size[0]/2), int(y-im.size[1]/2)))
-
-    map_image.alpha_composite(bg)
 
 
 def view_window(window_size, map_size, current_p):
@@ -124,7 +90,7 @@ def init_map_object(positions, video_size, zoom, provider):
     if mm.zoom > 18: # FIXME: max zoom in API missing
         mm = geotiler.Map(extent=extent, zoom=18)
 
-    print('map size:', mm.size, ', map zoom:', mm.zoom)
+    print('map size:', mm.size, ', map zoom:', mm.zoom, ', map extent:', mm.extent)
 
     return mm, extent, video_size
 
@@ -168,23 +134,16 @@ def show_full_route(writer, mm, map_image, extent, window_size, current_p, time_
         writer.write(image_resized.tobytes())
 
 
-def render_photo(writer, window_size, photo_list, time_in_sec=1.5):
-    print('render photo:', photo_list)
+def smooth_center(rev_geocode, location_list, i, window2=7):
+    start, end = max(0, i-window2), min(len(location_list), i+window2)
+    p_list = [rev_geocode(l) for l in location_list[start:end]]
 
-    num_frame = int(args.fps * time_in_sec)
+    x = sum([a for a, _ in p_list]) / len(p_list)
+    y = sum([a for _, a in p_list]) / len(p_list)
 
-    for photo in photo_list:
-        with Image.open(photo) as im:
-            im = im.convert('RGBA')
+    # print(rev_geocode(location_list[i]), (x, y))
 
-            r = min(window_size[0]/im.size[0], window_size[1]/im.size[1])
-            im = im.resize((int(im.size[0] * r), int(im.size[1] * r)))
-
-            bg = Image.new('RGBA', window_size)
-            bg.paste(im, ((bg.size[0]-im.size[0])//2, (bg.size[1]-im.size[1])//2))
-
-            for i in range(num_frame): writer.write(bg.tobytes())
-
+    return (x, y)
 
 
 #
@@ -201,6 +160,10 @@ parser = argparse.ArgumentParser(description=desc)
 parser.add_argument(
     '-v', '--verbose', dest='verbose', help='Make a bunch of noise',
     action='store_true'
+)
+parser.add_argument(
+    '--cache-dir', dest='cache_dir', type=pathlib.Path, default=pathlib.Path.home() / '.cache/geotiler/',
+    help='location of cache(map tile, ...)'
 )
 providers = geotiler.providers()
 parser.add_argument(
@@ -224,14 +187,16 @@ parser.add_argument(
     help='duration of video'
 )
 parser.add_argument(
-    '--photo', dest='photo',
-    help='photo to show, sep by comma'
+    '--photo', dest='photo', default = None,
+    help='a file with photo name and [or] datetime as line'
 )
 parser.add_argument('filename', nargs='+', help='GPX file')
 parser.add_argument('output', help='Output video file')
 
 args = parser.parse_args()
 
+print('cache_dir:', args.cache_dir)
+args.cache_dir.mkdir(parents=True, exist_ok=True)
 
 #
 # read positions and determine map extents
@@ -246,19 +211,25 @@ print('gps num:', len(positions))
 
 mm, extent, args.size = init_map_object(positions, args.size, args.zoom, args.provider)
 
-photo_location_index = place_photo(args.photo, timestamps, positions)
-print(photo_location_index)
+is_mars_in_china = mm.provider.name.endswith('.mars_in_china')
+
+if is_mars_in_china: positions = fix_mars_in_china(positions)
+
+photo_render = PhotoRender(args.photo, timestamps, positions, is_mars_in_china)
+photo_render.debug()
 
 
 # sys.exit(0)
 
 
+render_map = my_render_map()
+
 print('render_map...')
-map_image = geotiler.render_map(mm)
+map_image = render_map(mm)
 
 draw = ImageDraw.Draw(map_image)
 
-draw_camera_icon(mm, map_image, positions, photo_location_index)
+photo_render.draw_camera_icon(mm, map_image)
 
 #
 # render positions
@@ -280,7 +251,7 @@ cmd_string = [
 ]
 p = subprocess.Popen(cmd_string, stdin=subprocess.PIPE)
 
-for i in range(len(positions)):
+for i, dt in enumerate(timestamps):
     if i == 0:
         plots = [mm.rev_geocode(positions[i]), mm.rev_geocode(positions[i])]
     else:
@@ -289,19 +260,22 @@ for i in range(len(positions)):
     line_width = 5
     draw.line(plots, fill=(255, 0, 0), width=line_width)
 
-    map_image_copy = map_image.copy()
-    new_draw = ImageDraw.Draw(map_image_copy)
-    x, y = plots[1]
+    # center_point = plots[1]
+    center_point = smooth_center(mm.rev_geocode, positions, i)
+    p1, p2 = view_window(args.size, map_image.size, center_point)
+    image_view = map_image.crop((p1[0], p1[1], p2[0], p2[1]))
+
+    new_plot_1 = (plots[1][0] - p1[0], plots[1][1] - p1[1])
+
+    new_draw = ImageDraw.Draw(image_view)
+    x, y = new_plot_1
     new_draw.ellipse((x-line_width, y-line_width, x+line_width, y+line_width), fill=(255, 255, 255))
 
-    image_rotated = rotate_image(map_image_copy, plots[1], i)
-
-    p1, p2 = view_window(args.size, map_image.size, plots[1])
-    image_view = image_rotated.crop((p1[0], p1[1], p2[0], p2[1]))
+    # image_view = rotate_image(image_view, new_plot_1, i)
 
     p.stdin.write(image_view.tobytes())
 
-    if i in photo_location_index: render_photo(p.stdin, args.size, photo_location_index[i])
+    photo_render.render_photo_if_need(p.stdin, args.size, dt, args.fps)
 
 show_full_route(p.stdin, mm, map_image, extent, args.size, plots[1])
 

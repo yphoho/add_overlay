@@ -1,0 +1,7 @@
+{
+    "name": "Esri.WorldImagery",
+    "attribution": "Tiles © Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+    "url": "http://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    "extension": "jpg",
+    "limit": 2
+}

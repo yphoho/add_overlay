@@ -175,4 +175,7 @@ cython_debug/
 *.csv
 *.fit
 *.gpx
+
 gopro
+photo
+audio

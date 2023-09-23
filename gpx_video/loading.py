@@ -5,6 +5,7 @@
 import sys
 import os
 
+from collections import namedtuple
 from datetime import datetime
 
 from pathlib import Path
@@ -13,6 +14,8 @@ import bz2
 import gzip
 import lzma
 
+
+Session = namedtuple('Session', ['timestamp', 'total_distance', 'total_elapsed_time', 'total_moving_time', 'max_speed', 'avg_speed'])
 
 tzinfo = datetime.now().astimezone().tzinfo
 
@@ -32,14 +35,13 @@ def load_gps_data(filepath_list):
         suffix = Path(filepath).suffix.lower()
         if suffix == ".gpx":
             t, p = load_gpx_file(filepath)
-            timestamp.extend(t)
-            positions.extend(p)
         elif suffix == ".fit":
             t, p = load_fit_file(filepath)
-            timestamp.extend(t)
-            positions.extend(p)
         else:
             fatal(f"Don't recognise filetype from {filepath} - support .gpx and .fit")
+
+        timestamp.extend(t)
+        positions.extend(p)
 
     return timestamp, positions
 
@@ -98,23 +100,30 @@ def load_gpx_file(filename):
 def load_fit_file(filename):
     from fit_tool.fit_file import FitFile
     from fit_tool.profile.messages.record_message import RecordMessage
+    from fit_tool.profile.messages.session_message import SessionMessage
 
     timestamp, lon, lat, alt = [], [], [], []
     speed, distance, cadence = [], [], []
+    session = None
 
     ff = FitFile.from_file(filename)
     for record in ff.records:
         message = record.message
-        if not isinstance(message, RecordMessage): continue
+        if isinstance(message, RecordMessage):
+            if message.position_long is None: continue
 
-        timestamp.append(datetime.fromtimestamp(message.timestamp//1000).replace(tzinfo=tzinfo))
-        lon.append(message.position_long)
-        lat.append(message.position_lat)
-        alt.append(message.altitude)
+            timestamp.append(datetime.fromtimestamp(message.timestamp//1000).replace(tzinfo=tzinfo))
+            lon.append(message.position_long)
+            lat.append(message.position_lat)
+            alt.append(message.altitude)
 
-        speed.append(message.speed)
-        distance.append(message.distance)
-        cadence.append(message.cadence)
+            speed.append(message.speed)
+            distance.append(message.distance)
+            cadence.append(message.cadence)
+        elif isinstance(message, SessionMessage):
+            session = Session(datetime.fromtimestamp(message.timestamp//1000).replace(tzinfo=tzinfo), message.total_distance, message.total_elapsed_time, message.total_moving_time, message.max_speed, message.avg_speed)
+
+    print(session)
 
     return timestamp, zip(lon, lat)
 

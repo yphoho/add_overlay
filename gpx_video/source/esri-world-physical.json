@@ -1,0 +1,8 @@
+{
+    "name": "Esri.WorldPhysical",
+    "attribution": "Tiles © Esri &mdash; Source: US National Park Service",
+    "url": "http://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}",
+    "max_zoom": 8,
+    "extension": "jpg",
+    "limit": 2
+}

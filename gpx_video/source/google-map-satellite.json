@@ -1,0 +1,7 @@
+{
+    "name": "Google Satellite Imagery",
+    "attribution": "Google Map",
+    "url": "http://mt0.google.com/vt?lyrs=s&x={x}&s=&y={y}&z={z}",
+    "extension": "jpg",
+    "limit": 2
+}

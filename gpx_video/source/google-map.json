@@ -1,0 +1,7 @@
+{
+    "name": "Google Map.mars_in_china",
+    "attribution": "Google Map",
+    "url": "http://mt0.google.com/vt?lyrs=m&x={x}&s=&y={y}&z={z}",
+    "extension": "png",
+    "limit": 2
+}

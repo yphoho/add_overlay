@@ -5,36 +5,37 @@ set -u
 cd `dirname $0`
 
 
+gpx_file="t1.fit t2.fit"
+# gpx_file=qutianjin.gpx
+# gpx_file=miaofengshan.gpx
 # gpx_file=tuanpohu.fit
-gpx_file=tuanpohu.gpx
+# gpx_file=tuanpohu.gpx
 # gpx_file=haidiangongyuan.gpx
 # gpx_file=zhongguancun.gpx
 
-outfile=../gopro/$gpx_file.mp4
-rm -f $outfile
-
-# bluemarble,osm,stamen-terrain,stamen-terrain-background,stamen-terrain-lines,stamen-toner,stamen-toner-lite,stamen-watercolor,thunderforest-cycle
+outfile="../gopro/$gpx_file.mp4"
+rm -f "$outfile"
 
 # width=1920
 # height=1080
 width=540
 height=960
 
-./gpx_to_route.py -s $width $height -p osm --photo `ls -m ./photo/* | tr '\n' ' ' | sed 's/ //g'` $gpx_file $outfile
+## bluemarble,osm,stamen-terrain,stamen-terrain-background,stamen-terrain-lines,stamen-toner,stamen-toner-lite,stamen-watercolor,thunderforest-cycle
 
-# ./gpx_to_route.py -s $width $height -p stamen-toner $gpx_file $outfile
-# ./gpx_to_route.py -s $width $height -p stamen-toner-lite $gpx_file $outfile
+provider=esri-world-imagery
+# provider=osm
+# provider=google-map
+# provider=google-map-satellite-with-label
+# provider=stamen-toner
+# provider=stamen-toner-lite
 
-# ./gpx_to_route.py -s $width $height -p stamen-terrain $gpx_file $outfile
-# ./gpx_to_route.py -s $width $height -p stamen-terrain-background $gpx_file $outfile
-# ./gpx_to_route.py -s $width $height -p stamen-terrain-lines $gpx_file $outfile
-
-## ./gpx_to_route.py -s $width $height -p stamen-watercolor $gpx_file $outfile
-## ./gpx_to_route.py -s $width $height -p bluemarble $gpx_file $outfile
+./gpx_to_route.py -s $width $height -p $provider --photo ./p.txt $gpx_file "$outfile"
 
 
 audio_file=`ls ./audio/freepd/*.mp3 | shuf | tail -n1`
-outfile_with_audio=../gopro/$gpx_file-audio.mp4
-rm -f $outfile_with_audio
+outfile_with_audio="../gopro/$gpx_file-audio.mp4"
+rm -f "$outfile_with_audio"
 
-ffmpeg -y -hide_banner -loglevel error -i $outfile -i "$audio_file" -c:v copy -c:a aac -shortest $outfile_with_audio
+## -af apad
+ffmpeg -y -hide_banner -loglevel error -i "$outfile" -stream_loop -1 -i "$audio_file" -shortest -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac "$outfile_with_audio"
