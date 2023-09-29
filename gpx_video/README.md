@@ -7,8 +7,9 @@ Animate track point from gpx or fit file on map. Add photo and audio as needed.
 
 
 ## howto show photo in the video
-1. List the photo name in a file, and call the script as *--photo* arg;
+1. List the photo(or video) name in a file, and call the script as *--photo* arg;
 2. The photo must have GPS info, or give the datetime after photo name just like what it is in *p.txt*;
+3. The video clip must has datetime after the name;
 
 ## NOTE
 For the reason you know, *In China* it must make some effort to access OpenStreetMap, GoogleMap and many other maps. The good message, map tile from Esri is reachable.

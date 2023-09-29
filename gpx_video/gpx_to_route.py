@@ -13,7 +13,7 @@ import geotiler
 from PIL import Image, ImageDraw
 
 import loading
-from util import PhotoRender, fix_mars_in_china
+from util import splice_main_cmd_string, PhotoRender, fix_mars_in_china
 
 
 def my_render_map(is_cache=True):
@@ -74,16 +74,17 @@ def view_window(window_size, map_size, current_p):
     return (lr[0], tb[0]), (lr[1], tb[1])
 
 
-def init_map_object(positions, video_size, zoom, provider):
+def init_map_object(positions, auto_orientation, video_size, zoom, provider):
     x, y = zip(*positions)
     extent = min(x), min(y), max(x), max(y)
 
-    ## FIXME: XXXX
-    if (extent[2] - extent[0]) > (extent[3] - extent[1]):
-        # landscape
-        video_size = (max(video_size), min(video_size))
-    else:
-        video_size = (min(video_size), max(video_size))
+    if auto_orientation:
+        if (extent[2] - extent[0]) > (extent[3] - extent[1]):
+            # landscape
+            video_size = (max(video_size), min(video_size))
+        else:
+            # portrait
+            video_size = (min(video_size), max(video_size))
 
     mm = geotiler.Map(extent=extent, zoom=zoom, provider=provider)
     mm = geotiler.Map(size=(mm.size[0]+video_size[0], mm.size[1]+video_size[1]), extent=extent, provider=provider)
@@ -175,6 +176,10 @@ parser.add_argument(
     help='size of map image'
 )
 parser.add_argument(
+    '--auto-orientation', dest='auto_orientation', action='store_true',
+    help='swap the size by the shape of route automatically'
+)
+parser.add_argument(
     '-z', '--zoom', dest='zoom', type=int, default=14,
     help='zoom of map'
 )
@@ -209,7 +214,7 @@ print('gps num:', len(positions))
 # render map image
 #
 
-mm, extent, args.size = init_map_object(positions, args.size, args.zoom, args.provider)
+mm, extent, args.size = init_map_object(positions, args.auto_orientation, args.size, args.zoom, args.provider)
 
 is_mars_in_china = mm.provider.name.endswith('.mars_in_china')
 
@@ -237,18 +242,9 @@ photo_render.draw_camera_icon(mm, map_image)
 
 print('render video...')
 
-cmd_string = [
-    'ffmpeg',
-    '-y', '-hide_banner', '-loglevel', 'info',
-    '-f', 'rawvideo',
-    '-framerate', str(args.fps),
-    '-s', f'{args.size[0]}x{args.size[1]}',
-    '-pix_fmt', 'rgba',
-    '-i', '-',
-    '-vcodec', 'libx264', '-preset', 'veryfast',
-    '-r', str(args.fps),
-    args.output
-]
+cmd_string = splice_main_cmd_string(args.output, args.size, args.fps)
+print(cmd_string)
+
 p = subprocess.Popen(cmd_string, stdin=subprocess.PIPE)
 
 for i, dt in enumerate(timestamps):

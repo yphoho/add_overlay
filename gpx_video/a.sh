@@ -5,25 +5,24 @@ set -u
 cd `dirname $0`
 
 
-gpx_file="t1.fit t2.fit"
-# gpx_file=qutianjin.gpx
+gpx_file=haihexian.fit
+# gpx_file="t1.fit t2.fit"
 # gpx_file=miaofengshan.gpx
 # gpx_file=tuanpohu.fit
 # gpx_file=tuanpohu.gpx
-# gpx_file=haidiangongyuan.gpx
-# gpx_file=zhongguancun.gpx
 
 outfile="../gopro/$gpx_file.mp4"
 rm -f "$outfile"
 
 # width=1920
 # height=1080
-width=540
-height=960
+width=960
+height=540
 
 ## bluemarble,osm,stamen-terrain,stamen-terrain-background,stamen-terrain-lines,stamen-toner,stamen-toner-lite,stamen-watercolor,thunderforest-cycle
 
-provider=esri-world-imagery
+provider=gaode-map
+# provider=esri-world-imagery
 # provider=osm
 # provider=google-map
 # provider=google-map-satellite-with-label
@@ -31,9 +30,10 @@ provider=esri-world-imagery
 # provider=stamen-toner-lite
 
 ./gpx_to_route.py -s $width $height -p $provider --photo ./p.txt $gpx_file "$outfile"
+# ./gpx_to_route.py --auto-orientation -s $width $height -p $provider --photo ./p.txt $gpx_file "$outfile"
 
 
-audio_file=`ls ./audio/freepd/*.mp3 | shuf | tail -n1`
+audio_file=`find ./audio/ -type f | shuf | tail -n1`
 outfile_with_audio="../gopro/$gpx_file-audio.mp4"
 rm -f "$outfile_with_audio"
 

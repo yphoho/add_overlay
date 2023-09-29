@@ -1,0 +1,14 @@
+file 'main.mp4'
+inpoint 0.0
+outpoint 5.0
+file 'SmallClip.mp4'
+inpoint 0.0
+outpoint 5.0
+file 'main.mp4'
+inpoint 10.0
+outpoint 15.0
+file 'SmallClip.mp4'
+inpoint 20.0
+outpoint 25.0
+file 'main.mp4'
+inpoint 1:02.0

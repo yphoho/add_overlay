@@ -57,5 +57,7 @@ if __name__ == '__main__':
     print('https://mt0.google.com/vt?lyrs=p&x={1}&s=&y={2}&z={0}'.format(zoom, x, y)) # google map terrain with label
     print('https://mt0.google.com/vt?lyrs=h&x={1}&s=&y={2}&z={0}'.format(zoom, x, y)) # label
 
+    print('http://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={1}&y={2}&z={0}'.format(zoom, x, y))
+
     # http://mts0.googleapis.com/vt?lyrs={style}&x={x}&y={y}&z={z}
     # http://mt2.google.cn/vt/lyrs={style}&hl=zh-CN&gl=CN&src=app&x={x}&y={y}&z={z}
