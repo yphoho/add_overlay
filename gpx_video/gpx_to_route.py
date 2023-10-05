@@ -166,6 +166,10 @@ parser.add_argument(
     '--cache-dir', dest='cache_dir', type=pathlib.Path, default=pathlib.Path.home() / '.cache/geotiler/',
     help='location of cache(map tile, ...)'
 )
+parser.add_argument(
+    '--release', dest='is_release', action='store_true',
+    help='set it when the video is to publish'
+)
 providers = geotiler.providers()
 parser.add_argument(
     '-p', '--provider', dest='provider', choices=providers, default='osm',
@@ -220,7 +224,7 @@ is_mars_in_china = mm.provider.name.endswith('.mars_in_china')
 
 if is_mars_in_china: positions = fix_mars_in_china(positions)
 
-photo_render = PhotoRender(args.photo, timestamps, positions, is_mars_in_china)
+photo_render = PhotoRender(args.photo, timestamps, positions, is_mars_in_china, args.is_release)
 photo_render.debug()
 
 
@@ -242,7 +246,7 @@ photo_render.draw_camera_icon(mm, map_image)
 
 print('render video...')
 
-cmd_string = splice_main_cmd_string(args.output, args.size, args.fps)
+cmd_string = splice_main_cmd_string(args.output, args.size, args.fps, args.is_release)
 print(cmd_string)
 
 p = subprocess.Popen(cmd_string, stdin=subprocess.PIPE)

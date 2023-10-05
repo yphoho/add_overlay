@@ -5,11 +5,10 @@ set -u
 cd `dirname $0`
 
 
-gpx_file=haihexian.fit
+gpx_file=haihedonglu.fit
 # gpx_file="t1.fit t2.fit"
-# gpx_file=miaofengshan.gpx
 # gpx_file=tuanpohu.fit
-# gpx_file=tuanpohu.gpx
+# gpx_file=miaofengshan.gpx
 
 outfile="../gopro/$gpx_file.mp4"
 rm -f "$outfile"
@@ -29,7 +28,7 @@ provider=gaode-map
 # provider=stamen-toner
 # provider=stamen-toner-lite
 
-./gpx_to_route.py -s $width $height -p $provider --photo ./p.txt $gpx_file "$outfile"
+./gpx_to_route.py "$@" -s $width $height -p $provider --photo ./p.txt $gpx_file "$outfile"
 # ./gpx_to_route.py --auto-orientation -s $width $height -p $provider --photo ./p.txt $gpx_file "$outfile"
 
 

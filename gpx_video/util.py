@@ -47,7 +47,7 @@ def check_file_type(filepath):
             return None
 
 
-def splice_main_cmd_string(outfile, window_size, fps):
+def splice_main_cmd_string(outfile, window_size, fps, is_release):
     width, height = window_size
     cmd_string = [
         'ffmpeg',
@@ -55,24 +55,31 @@ def splice_main_cmd_string(outfile, window_size, fps):
         '-f', 'rawvideo', '-framerate', str(fps), '-s', f'{width}x{height}', '-pix_fmt', 'rgba',
         '-i', '-',
         '-r', str(fps),
-        '-vcodec', 'libx264', '-preset', 'fast',
-        outfile
+        '-vcodec', 'libx264'
     ]
+
+    if is_release: cmd_string.extend(['-preset', 'fast'])
+    else: cmd_string.extend(['-preset', 'superfast'])
+
+    cmd_string.append(outfile)
 
     return cmd_string
 
 
-def splice_clip_cmd_string(infile, window_size, fps):
+def splice_clip_cmd_string(infile, window_size, fps, is_release):
     width, height = window_size
     cmd_string = [
         'ffmpeg',
         '-y', '-hide_banner', '-loglevel', 'error',
         '-i', infile,
         '-vf', f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:-1:-1:color=black',
-        '-f', 'rawvideo', '-r', str(fps), '-s', f'{width}x{height}', '-pix_fmt', 'rgba',
-        '-preset', 'fast',
-        '-'
+        '-f', 'rawvideo', '-r', str(fps), '-s', f'{width}x{height}', '-pix_fmt', 'rgba'
     ]
+
+    if is_release: cmd_string.extend(['-preset', 'fast'])
+    else: cmd_string.extend(['-preset', 'ultrafast'])
+
+    cmd_string.append('-')
 
     return cmd_string
 
@@ -80,8 +87,9 @@ def splice_clip_cmd_string(infile, window_size, fps):
 PhotoInfo = namedtuple('PhotoInfo', ['photoname', 'is_video', 'dt', 'lon', 'lat'], defaults=(None, False, None, None, None))
 
 class PhotoRender(object):
-    def __init__(self, filename, timestamp_list, location_list, is_mars_in_china=False):
+    def __init__(self, filename, timestamp_list, location_list, is_mars_in_china=False, is_release=False):
         self.is_mars_in_china = is_mars_in_china
+        self.is_release = is_release
 
         self.photo_info_list = []
         self.photo_location_dict = defaultdict(list)
@@ -101,7 +109,7 @@ class PhotoRender(object):
             if photo_info.is_video:
                 print('render video:', photo_info.photoname)
 
-                cmd_string = splice_clip_cmd_string(photo_info.photoname, window_size, fps)
+                cmd_string = splice_clip_cmd_string(photo_info.photoname, window_size, fps, self.is_release)
                 print(cmd_string)
 
                 p2 = subprocess.Popen(cmd_string, stdout=writer)
