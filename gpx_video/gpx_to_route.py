@@ -10,7 +10,7 @@ import subprocess
 
 import geotiler
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 import loading
 from util import splice_main_cmd_string, PhotoRender, fix_mars_in_china
@@ -40,15 +40,13 @@ def my_render_map(is_cache=True):
     return functools.partial(geotiler.render_map, downloader=downloader)
 
 
-def load_gps_point(filename, num_p):
-    timestamps, positions = loading.load_gps_data(filename)
+def load_gps_point(filename, fps):
+    timestamps, positions, sess = loading.load_gps_data(filename)
 
     # print(timestamps[0].timestamp(), type(timestamps[0]))
     print('origin gps num:', len(positions))
 
-    # positions = positions[int(len(positions)/2):]
-
-    num_p = max(num_p, len(positions) // 4)
+    num_p = int(len(positions) / (240 / fps))
 
     r = 1.0 * len(positions) / num_p
     new_positions = [positions[int(r*i)] for i in range(num_p)]
@@ -56,7 +54,7 @@ def load_gps_point(filename, num_p):
     new_timestamps = [timestamps[int(r*i)] for i in range(num_p)]
     new_timestamps.append(timestamps[-1])
 
-    return new_timestamps, new_positions
+    return new_timestamps, new_positions, sess
 
 
 def view_window(window_size, map_size, current_p):
@@ -104,7 +102,34 @@ def rotate_image(image, current_p, i):
     return image_rotated
 
 
-def show_full_route(writer, mm, map_image, extent, window_size, current_p, time_in_sec=2):
+def draw_gauge(im, sess):
+    if sess is None: return im
+
+    hour = int(sess.total_moving_time)
+    minute = int((sess.total_moving_time - hour) * 60)
+    text = 'distance: %.1f km, time: %dh%dm, speed: %.1f km/h' %  (sess.total_distance, hour, minute, sess.avg_speed)
+
+    font = ImageFont.truetype('./font/Gidole-Regular.ttf', size=30)
+    l = font.getlength(text)
+
+    draw = ImageDraw.Draw(im)
+    if l > im.width:
+        text = text.replace(', ', '\n')
+
+        x = im.width // 4
+        y = im.height // 5
+
+        draw.multiline_text((x, y), text, fill=(0, 0, 255), font=font)
+    else:
+        x = (im.width - l) // 2
+        y = im.height // 10
+
+        draw.text((x, y), text, fill=(0, 0, 255), font=font)
+
+    return im
+
+
+def show_full_route(writer, mm, map_image, extent, window_size, current_p, sess, time_in_sec=3):
     num_frame = int(args.fps * time_in_sec)
 
     p1, p2 = mm.rev_geocode((extent[0], extent[1])), mm.rev_geocode((extent[2], extent[3]))
@@ -130,9 +155,10 @@ def show_full_route(writer, mm, map_image, extent, window_size, current_p, time_
         p1, p2 = view_window((box_width, box_height), map_image.size, new_current_p)
         print(i, new_current_p, p1, p2)
 
-        image_resized = map_image.resize(window_size, box=(p1[0], p1[1], p2[0], p2[1]))
+        image_view = map_image.resize(window_size, box=(p1[0], p1[1], p2[0], p2[1]))
+        image_view = draw_gauge(image_view, sess)
 
-        writer.write(image_resized.tobytes())
+        writer.write(image_view.tobytes())
 
 
 def smooth_center(rev_geocode, location_list, i, window2=7):
@@ -188,12 +214,8 @@ parser.add_argument(
     help='zoom of map'
 )
 parser.add_argument(
-    '-f', '--fps', dest='fps', type=int, default=60,
+    '-f', '--fps', dest='fps', type=int, default=30,
     help='fps of video'
-)
-parser.add_argument(
-    '-d', '--duration', dest='duration', type=int, default=30,
-    help='duration of video'
 )
 parser.add_argument(
     '--photo', dest='photo', default = None,
@@ -211,7 +233,7 @@ args.cache_dir.mkdir(parents=True, exist_ok=True)
 # read positions and determine map extents
 #
 print('load gps data...')
-timestamps, positions = load_gps_point(args.filename, args.fps * args.duration)
+timestamps, positions, sess = load_gps_point(args.filename, args.fps)
 print('gps num:', len(positions))
 
 #
@@ -228,7 +250,7 @@ photo_render = PhotoRender(args.photo, timestamps, positions, is_mars_in_china, 
 photo_render.debug()
 
 
-# sys.exit(0)
+# sys.exit(1)
 
 
 render_map = my_render_map()
@@ -277,8 +299,9 @@ for i, dt in enumerate(timestamps):
 
     photo_render.render_photo_if_need(p.stdin, args.size, dt, args.fps)
 
-show_full_route(p.stdin, mm, map_image, extent, args.size, plots[1])
+show_full_route(p.stdin, mm, map_image, extent, args.size, plots[1], sess)
 
+# p.stdin.flush()
 p.stdin.close()
 p.wait()
 

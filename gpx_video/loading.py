@@ -15,9 +15,41 @@ import gzip
 import lzma
 
 
-Session = namedtuple('Session', ['timestamp', 'total_distance', 'total_elapsed_time', 'total_moving_time', 'max_speed', 'avg_speed'])
-
 tzinfo = datetime.now().astimezone().tzinfo
+
+
+# Session = namedtuple('Session', ['dt', 'total_distance', 'total_elapsed_time', 'total_moving_time', 'max_speed', 'avg_speed'])
+class Session(object):
+    def __init__(self, dt, total_distance, total_elapsed_time, total_moving_time, max_speed, avg_speed):
+        self.dt = dt
+        self.total_distance = total_distance / 1000
+        self.total_elapsed_time = total_elapsed_time / 3600
+        self.total_moving_time = total_moving_time / 3600
+        self.max_speed = max_speed * 3.6
+        self.avg_speed = avg_speed * 3.6
+
+    def __str__(self):
+        return f'datetime:{self.dt}, total_distance:{self.total_distance}, total_elapsed_time:{self.total_elapsed_time}, total_moving_time:{self.total_moving_time}, max_speed:{self.max_speed}, avg_speed:{self.avg_speed}'
+
+    def merge(self, b):
+        self.dt = min(self.dt, b.dt)
+        self.total_distance += b.total_distance
+        self.total_elapsed_time += b.total_elapsed_time
+        self.total_moving_time += b.total_moving_time
+        self.max_speed = max(self.max_speed, b.max_speed)
+        self.avg_speed = self.total_distance / self.total_moving_time
+
+    @staticmethod
+    def merge_session(sess_list):
+        if not sess_list: return None
+
+        sess = sess_list[0]
+        for s in sess_list[1:]:
+            sess.merge(s)
+
+        print(sess)
+
+        return sess
 
 
 def log(s):
@@ -30,20 +62,23 @@ def fatal(s, error=True):
 
 
 def load_gps_data(filepath_list):
-    timestamp, positions = [], []
+    timestamp, positions, sess_list = [], [], []
     for filepath in filepath_list:
         suffix = Path(filepath).suffix.lower()
         if suffix == ".gpx":
             t, p = load_gpx_file(filepath)
         elif suffix == ".fit":
-            t, p = load_fit_file(filepath)
+            t, p, sess = load_fit_file(filepath)
+            sess_list.append(sess)
         else:
             fatal(f"Don't recognise filetype from {filepath} - support .gpx and .fit")
 
         timestamp.extend(t)
         positions.extend(p)
 
-    return timestamp, positions
+    sess = Session.merge_session(sess_list)
+
+    return timestamp, positions, sess
 
 
 FILE_OPENER = {
@@ -125,7 +160,7 @@ def load_fit_file(filename):
 
     print(session)
 
-    return timestamp, zip(lon, lat)
+    return timestamp, zip(lon, lat), session
 
 
 if __name__ == '__main__':
