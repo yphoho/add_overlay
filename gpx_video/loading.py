@@ -158,7 +158,7 @@ def load_fit_file(filename):
         elif isinstance(message, SessionMessage):
             session = Session(datetime.fromtimestamp(message.timestamp//1000).replace(tzinfo=tzinfo), message.total_distance, message.total_elapsed_time, message.total_moving_time, message.max_speed, message.avg_speed)
 
-    print(session)
+    # print(session)
 
     return timestamp, zip(lon, lat), session
 

@@ -28,13 +28,7 @@ provider=gaode-map
 # provider=stamen-toner
 # provider=stamen-toner-lite
 
-./gpx_to_route.py "$@" -s $width $height -p $provider --photo ./p.txt $gpx_file "$outfile"
-# ./gpx_to_route.py --auto-orientation -s $width $height -p $provider --photo ./p.txt $gpx_file "$outfile"
-
-
 audio_file=`find ./audio/ -type f | shuf | tail -n1`
-outfile_with_audio="../gopro/$gpx_file-audio.mp4"
-rm -f "$outfile_with_audio"
 
-## -af apad
-ffmpeg -y -hide_banner -loglevel error -i "$outfile" -stream_loop -1 -i "$audio_file" -shortest -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac "$outfile_with_audio"
+./gpx_to_route.py "$@" -s $width $height -p $provider --audio "$audio_file" --photo ./p.txt $gpx_file "$outfile"
+# ./gpx_to_route.py "$@" --auto-orientation -s $width $height -p $provider --audio "$audio_file" --photo ./p.txt $gpx_file "$outfile"

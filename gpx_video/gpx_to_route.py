@@ -1,7 +1,9 @@
 #!/usr/bin/python3
 
 import sys
+import os
 
+import shutil
 import pathlib
 import argparse
 import functools
@@ -12,8 +14,21 @@ import geotiler
 
 from PIL import Image, ImageDraw, ImageFont
 
+import util
 import loading
-from util import splice_main_cmd_string, PhotoRender, fix_mars_in_china
+
+
+class WriteCounter(object):
+    def __init__(self, writer, frame_num=0):
+        self.writer = writer
+        self.frame_num = 0
+
+    def write(self, something):
+        self.frame_num += 1
+        self.writer.write(something)
+
+    def current_frame_num(self):
+        return self.frame_num
 
 
 def my_render_map(is_cache=True):
@@ -43,9 +58,6 @@ def my_render_map(is_cache=True):
 def load_gps_point(filename, fps):
     timestamps, positions, sess = loading.load_gps_data(filename)
 
-    # print(timestamps[0].timestamp(), type(timestamps[0]))
-    print('origin gps num:', len(positions))
-
     num_p = int(len(positions) / (240 / fps))
 
     r = 1.0 * len(positions) / num_p
@@ -53,6 +65,8 @@ def load_gps_point(filename, fps):
     new_positions.append(positions[-1])
     new_timestamps = [timestamps[int(r*i)] for i in range(num_p)]
     new_timestamps.append(timestamps[-1])
+
+    print('origin gps num:%d, used gps num:%d' % (len(positions), len(new_positions)))
 
     return new_timestamps, new_positions, sess
 
@@ -153,7 +167,7 @@ def show_full_route(writer, mm, map_image, extent, window_size, current_p, sess,
         new_current_p = (current_p[0] + x_per_frame * i, current_p[1] + y_per_frame * i)
 
         p1, p2 = view_window((box_width, box_height), map_image.size, new_current_p)
-        print(i, new_current_p, p1, p2)
+        # print(i, new_current_p, p1, p2)
 
         image_view = map_image.resize(window_size, box=(p1[0], p1[1], p2[0], p2[1]))
         image_view = draw_gauge(image_view, sess)
@@ -173,14 +187,115 @@ def smooth_center(rev_geocode, location_list, i, window2=7):
     return (x, y)
 
 
+def scale_video_clip(video_list, window_size, fps, keep_audio):
+    clip_scale_proc_dict = {}
+    for video in video_list:
+        outfile = video + '.' + str(keep_audio) + '.scale.mp4'
+
+        if not os.path.exists(outfile):
+            print('scale video:', video)
+            cmd_string = util.splice_scale_cmd_string(video, outfile, window_size, fps, keep_audio)
+        else:
+            cmd_string = ['true']
+
+        ## NOTE: MUST open it with stdin when run parallel, https://stackoverflow.com/a/6659191/1079820
+        p = subprocess.Popen(cmd_string, stdin=subprocess.PIPE)
+        # p.stdin.close(); p.wait()
+
+        clip_scale_proc_dict[video] = [p, outfile]
+
+    return clip_scale_proc_dict
+
+
+def wait_proc_and_add_silent_audio(clip_starttime_list, clip_scale_proc_dict, keep_audio):
+    new_clip_starttime_list = []
+    for clip, starttime in clip_starttime_list:
+        p, clip = clip_scale_proc_dict[clip]
+        p.stdin.close(); p.wait()
+
+        new_clip_starttime_list.append((clip, starttime))
+
+        if keep_audio and not util.exists_audio(clip): ffmpeg_add_silent_audio(clip)
+
+    return new_clip_starttime_list
+
+
+def ffmpeg_concat_main_and_clip(main_video, clip_starttime_list, keep_audio, is_release):
+    if not clip_starttime_list: return
+
+    print('concat video...')
+
+    clip_list, filter_complex = [], []
+    inpoint = 0.0
+    for i, (clip, outpoint) in enumerate(clip_starttime_list):
+        clip_list.append(clip)
+
+        filter_complex.append('[0:v]trim=%.3f:%.3f,setpts=PTS-STARTPTS[v%d];' % (inpoint, outpoint, i))
+        if keep_audio: filter_complex.append('[0:a]atrim=%.3f:%.3f,asetpts=PTS-STARTPTS[a%d];' % (inpoint, outpoint, i))
+
+        inpoint = outpoint
+
+    filter_complex.append('[0:v]trim=start=%.3f,setpts=PTS-STARTPTS[v%d];' % (inpoint, i+1))
+    if keep_audio: filter_complex.append('[0:a]atrim=start=%.3f,asetpts=PTS-STARTPTS[a%d];' % (inpoint, i+1))
+
+    filter_complex.append('[v0]')
+    if keep_audio: filter_complex.append('[a0]')
+    for i in range(1, len(clip_list)+1):
+        if keep_audio: filter_complex.append('[%d:v][%d:a][v%d][a%d]' % (i, i, i, i))
+        else: filter_complex.append('[%d:v][v%d]' % (i, i))
+
+    video_map, audio_map = '[outv]', '[outa]'
+    if keep_audio:
+        filter_complex.append('concat=n=%d:v=1:a=1%s%s' % (len(clip_list)*2+1, video_map, audio_map))
+    else:
+        audio_map = None
+        filter_complex.append('concat=n=%d:v=1:a=0%s' % (len(clip_list)*2+1, video_map))
+
+    # print(filter_complex)
+
+    outfile = main_video + '.concat.mp4'
+    cmd_string = util.splice_concat_cmd_string2([main_video] + clip_list, outfile, ''.join(filter_complex), video_map, audio_map, is_release)
+    subprocess.run(cmd_string)
+
+    os.rename(outfile, main_video)
+
+
+    # concat_file = os.path.basename(main_video) + '.concat.txt'
+    # f = open(concat_file, 'w')
+
+    # inpoint = 0.0
+    # for clip, outpoint in clip_starttime_list:
+    #     f.write('file \'%s\'\ninpoint %.3f\noutpoint %.3f\n' % (main_video, inpoint, outpoint))
+    #     f.write('file \'%s\'\n' % clip)
+
+    #     inpoint = outpoint
+    # f.write('file \'%s\'\ninpoint %.3f\n' % (main_video, inpoint))
+    # f.close()
+
+    # outfile = main_video + '.concat.mp4'
+    # cmd_string = util.splice_concat_cmd_string(concat_file, outfile, is_release)
+    # subprocess.run(cmd_string)
+
+    # os.rename(outfile, main_video)
+
+
+def ffmpeg_add_audio(video_file, audio_file):
+    outfile = video_file + '.audio.mp4'
+
+    cmd_string = util.splice_audio_cmd_string(outfile, video_file, audio_file)
+    subprocess.run(cmd_string)
+
+    os.rename(outfile, video_file)
+
+
+ffmpeg_add_silent_audio = functools.partial(ffmpeg_add_audio, audio_file=None)
+
+
 #
 # parse arguments
 #
 desc = """
 Read positions from set of GPX files and draw them on a map.
-
-The map size is set to 540*960 and can be changed with commandline
-parameter.
 """
 
 parser = argparse.ArgumentParser(description=desc)
@@ -218,15 +333,22 @@ parser.add_argument(
     help='fps of video'
 )
 parser.add_argument(
+    '--audio', dest='audio', default = None,
+    help='the audio to play'
+)
+parser.add_argument(
     '--photo', dest='photo', default = None,
     help='a file with photo name and [or] datetime as line'
+)
+parser.add_argument(
+    '--keep-audio', dest='keep_audio', action='store_true',
+    help='keep the clip audio or not'
 )
 parser.add_argument('filename', nargs='+', help='GPX file')
 parser.add_argument('output', help='Output video file')
 
 args = parser.parse_args()
 
-print('cache_dir:', args.cache_dir)
 args.cache_dir.mkdir(parents=True, exist_ok=True)
 
 #
@@ -234,7 +356,6 @@ args.cache_dir.mkdir(parents=True, exist_ok=True)
 #
 print('load gps data...')
 timestamps, positions, sess = load_gps_point(args.filename, args.fps)
-print('gps num:', len(positions))
 
 #
 # render map image
@@ -244,19 +365,19 @@ mm, extent, args.size = init_map_object(positions, args.auto_orientation, args.s
 
 is_mars_in_china = mm.provider.name.endswith('.mars_in_china')
 
-if is_mars_in_china: positions = fix_mars_in_china(positions)
+if is_mars_in_china: positions = util.fix_mars_in_china(positions)
 
-photo_render = PhotoRender(args.photo, timestamps, positions, is_mars_in_china, args.is_release)
+photo_render = util.PhotoRender(args.photo, timestamps, positions, is_mars_in_china, args.is_release)
 photo_render.debug()
+
+clip_scale_proc_dict = scale_video_clip(photo_render.videos(), args.size, args.fps, args.keep_audio)
 
 
 # sys.exit(1)
 
 
-render_map = my_render_map()
-
 print('render_map...')
-map_image = render_map(mm)
+map_image = my_render_map()(mm)
 
 draw = ImageDraw.Draw(map_image)
 
@@ -266,13 +387,14 @@ photo_render.draw_camera_icon(mm, map_image)
 # render positions
 #
 
-print('render video...')
+print('render route...')
 
-cmd_string = splice_main_cmd_string(args.output, args.size, args.fps, args.is_release)
-print(cmd_string)
+cmd_string = util.splice_main_cmd_string(args.output, args.size, args.fps, args.is_release)
 
 p = subprocess.Popen(cmd_string, stdin=subprocess.PIPE)
+write_counter = WriteCounter(p.stdin)
 
+clip_starttime_list = []
 for i, dt in enumerate(timestamps):
     if i == 0:
         plots = [mm.rev_geocode(positions[i]), mm.rev_geocode(positions[i])]
@@ -295,14 +417,26 @@ for i, dt in enumerate(timestamps):
 
     # image_view = rotate_image(image_view, new_plot_1, i)
 
-    p.stdin.write(image_view.tobytes())
+    write_counter.write(image_view.tobytes())
 
-    photo_render.render_photo_if_need(p.stdin, args.size, dt, args.fps)
+    photo_info_list = photo_render.render_photo_if_need(p.stdin, write_counter, args.size, dt, args.fps)
 
-show_full_route(p.stdin, mm, map_image, extent, args.size, plots[1], sess)
+    clip_starttime_list.extend([(pi.photo_name, write_counter.current_frame_num()/args.fps) for pi in photo_info_list if pi.is_video])
+
+show_full_route(write_counter, mm, map_image, extent, args.size, plots[1], sess)
+
+print('frame num:', write_counter.current_frame_num())
 
 # p.stdin.flush()
-p.stdin.close()
-p.wait()
+p.stdin.close(); p.wait()
 
 map_image.save(args.output+'.png')
+
+shutil.copy2(args.output, args.output+'.route.mp4')
+
+if args.keep_audio: ffmpeg_add_audio(args.output, args.audio)
+
+new_clip_starttime_list = wait_proc_and_add_silent_audio(clip_starttime_list, clip_scale_proc_dict, args.keep_audio)
+
+ffmpeg_concat_main_and_clip(args.output, new_clip_starttime_list, args.keep_audio, args.is_release)
+if not args.keep_audio and args.audio: ffmpeg_add_audio(args.output, args.audio)
