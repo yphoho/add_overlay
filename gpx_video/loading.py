@@ -15,10 +15,6 @@ import gzip
 import lzma
 
 
-tzinfo = datetime.now().astimezone().tzinfo
-
-
-# Session = namedtuple('Session', ['dt', 'total_distance', 'total_elapsed_time', 'total_moving_time', 'max_speed', 'avg_speed'])
 class Session(object):
     def __init__(self, dt, total_distance, total_elapsed_time, total_moving_time, max_speed, avg_speed):
         self.dt = dt
@@ -147,7 +143,7 @@ def load_fit_file(filename):
         if isinstance(message, RecordMessage):
             if message.position_long is None: continue
 
-            timestamp.append(datetime.fromtimestamp(message.timestamp//1000).replace(tzinfo=tzinfo))
+            timestamp.append(datetime.fromtimestamp(message.timestamp//1000).astimezone())
             lon.append(message.position_long)
             lat.append(message.position_lat)
             alt.append(message.altitude)
@@ -156,7 +152,7 @@ def load_fit_file(filename):
             distance.append(message.distance)
             cadence.append(message.cadence)
         elif isinstance(message, SessionMessage):
-            session = Session(datetime.fromtimestamp(message.timestamp//1000).replace(tzinfo=tzinfo), message.total_distance, message.total_elapsed_time, message.total_moving_time, message.max_speed, message.avg_speed)
+            session = Session(datetime.fromtimestamp(message.timestamp//1000).astimezone(), message.total_distance, message.total_elapsed_time, message.total_moving_time, message.max_speed, message.avg_speed)
 
     # print(session)
 

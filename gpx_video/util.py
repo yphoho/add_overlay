@@ -13,9 +13,8 @@ import subprocess
 
 from geopy.distance import geodesic
 
-from PIL import Image, ExifTags
-
-from loading import tzinfo
+import exif
+from PIL import Image
 
 
 def wgs2gcj(lon, lat):
@@ -258,7 +257,7 @@ class PhotoRender(object):
         for line in open(filename):
             if line.startswith('#') or line.startswith('\n'): continue
 
-            xxxx = line.strip().split(' ', 1)
+            xxxx = line.strip().split(' ')
 
             photo_name = xxxx[0]
             if not os.path.exists(photo_name): continue
@@ -269,7 +268,7 @@ class PhotoRender(object):
             is_video = (file_type == 'video')
 
             if len(xxxx) > 1:
-                dt = datetime.strptime(xxxx[1], '%Y-%m-%d %H:%M:%S').replace(tzinfo=tzinfo)
+                dt = datetime.strptime(xxxx[1], '%Y-%m-%dT%H:%M:%S%z')
                 self.photo_info_list.append(PhotoInfo(photo_name, is_video, dt))
             elif len(xxxx) == 1 and not is_video:
                 aaa = self._read_photo_location_from_file(photo_name)
@@ -299,16 +298,16 @@ class PhotoRender(object):
             v.sort(key=lambda a: (a.is_video, a.dt))
 
     def _read_photo_location_from_file(self, photo):
-        with Image.open(photo) as im:
-            exif = im.getexif()
-            gps_ifd = exif.get_ifd(ExifTags.IFD.GPSInfo)
-            if not gps_ifd: return None
+        with open(photo, 'rb') as image_file:
+            my_image = exif.Image(image_file)
 
-            dt = datetime.strptime(exif[ExifTags.Base.DateTime], '%Y:%m:%d %H:%M:%S').replace(tzinfo=tzinfo)
-            lon = float(sum([x / (60 ** i) for i, x in enumerate(gps_ifd[ExifTags.GPS.GPSLongitude])]))
-            lat = float(sum([x / (60 ** i) for i, x in enumerate(gps_ifd[ExifTags.GPS.GPSLatitude])]))
+        if not 'gps_longitude' in my_image.list_all(): return None
 
-            return dt, lon, lat
+        dt = datetime.strptime(my_image.datetime+my_image.offset_time.replace(':', ''), '%Y:%m:%d %H:%M:%S%z')
+        lon = float(sum([x / (60 ** i) for i, x in enumerate(my_image.gps_longitude)]))
+        lat = float(sum([x / (60 ** i) for i, x in enumerate(my_image.gps_latitude)]))
+
+        return dt, lon, lat
 
 
 if __name__ == '__main__':

@@ -1,6 +1,8 @@
 geotiler
 geopy
 
+exif
+
 gpxpy
 fit-tool
 

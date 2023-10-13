@@ -1,3 +1,6 @@
+// https://github.com/AliFlux/MapTilesDownloader/blob/master/src/UI/main.js
+
+
 var mapView;
 
 $(function() {
@@ -49,7 +52,7 @@ $(function() {
 		map = new mapboxgl.Map({
 			container: 'map-view',
 			style: 'mapbox://styles/aliashraf/ck6lw9nr80lvo1ipj8zovttdx',
-			center: [-73.983652, 40.755024], 
+			center: [-73.983652, 40.755024],
 			zoom: 12
 		});
 
@@ -119,7 +122,7 @@ $(function() {
 	}
 
 	function initializeRectangleTool() {
-		
+
 		var modes = MapboxDraw.modes;
 		modes.draw_rectangle = DrawRectangle.default;
 
@@ -430,7 +433,7 @@ $(function() {
 			return;
 		}
 
-		cancellationToken = false; 
+		cancellationToken = false;
 		requests = [];
 
 		$("#main-sidebar").hide();
@@ -456,7 +459,7 @@ $(function() {
 		var bounds = getBounds();
 		var boundsArray = [bounds.getSouthWest().lng, bounds.getSouthWest().lat, bounds.getNorthEast().lng, bounds.getNorthEast().lat]
 		var centerArray = [bounds.getCenter().lng, bounds.getCenter().lat, getMaxZoom()]
-		
+
 		var data = new FormData();
 		data.append('minZoom', getMinZoom())
 		data.append('maxZoom', getMaxZoom())
@@ -543,7 +546,7 @@ $(function() {
 				updateProgress(i, allTiles.length);
 
 				done();
-				
+
 				if(cancellationToken) {
 					return;
 				}
