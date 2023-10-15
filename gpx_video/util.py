@@ -14,7 +14,7 @@ import subprocess
 from geopy.distance import geodesic
 
 import exif
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 def wgs2gcj(lon, lat):
@@ -85,7 +85,7 @@ def splice_clip_cmd_string(infile, window_size, fps, is_release):
     return cmd_string
 
 
-def splice_scale_cmd_string(infile, outfile, window_size, fps, keep_audio):
+def splice_scale_cmd_string(infile, outfile, window_size, fps):
     width, height = window_size
     cmd_string = [
         'ffmpeg',
@@ -93,15 +93,12 @@ def splice_scale_cmd_string(infile, outfile, window_size, fps, keep_audio):
         '-i', infile,
         '-vf', f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:-1:-1:color=black',
         '-r', str(fps),
-        '-c:v', 'libx264'
+        '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-preset', 'fast',
+        outfile
     ]
 
-    if keep_audio: cmd_string.extend(['-c:a', 'aac'])
-    else: cmd_string.append('-an')
-
-    cmd_string.extend(['-preset', 'fast'])
-
-    cmd_string.append(outfile)
     print(cmd_string)
 
     return cmd_string
@@ -217,12 +214,9 @@ class PhotoRender(object):
                 print('render photo:', photo_info.photo_name)
 
                 im = Image.open(photo_info.photo_name).convert('RGBA')
+                ImageOps.exif_transpose(im, in_place=True)
 
-                r = min(window_size[0]/im.size[0], window_size[1]/im.size[1])
-                im = im.resize((int(im.size[0] * r), int(im.size[1] * r)))
-
-                bg = Image.new('RGBA', window_size)
-                bg.paste(im, ((bg.size[0]-im.size[0])//2, (bg.size[1]-im.size[1])//2))
+                bg = ImageOps.pad(im, window_size)
 
                 for i in range(num_frame): writer.write(bg.tobytes())
 
@@ -234,10 +228,10 @@ class PhotoRender(object):
                 if pi.is_video:
                     yield pi.photo_name
 
-    def draw_camera_icon(self, mm, map_image, icon='./icon/c3.png', icon_video='./icon/c1.png'):
+    def draw_camera_icon(self, mm, map_image, icon='./icon/c3.png', icon_video='./icon/c1.png', icon_size=(60, 60)):
         bg = Image.new('RGBA', map_image.size)
-        im = Image.open(icon)
-        im_video = Image.open(icon_video)
+        im = ImageOps.contain(Image.open(icon), icon_size)
+        im_video = ImageOps.contain(Image.open(icon_video), icon_size)
 
         for photo_info_list in self.photo_location_dict.values():
             for photo_info in photo_info_list:

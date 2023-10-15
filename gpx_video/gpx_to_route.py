@@ -188,14 +188,14 @@ def smooth_center(rev_geocode, location_list, i, window2=7):
     return (x, y)
 
 
-def scale_video_clip(video_list, window_size, fps, keep_audio):
+def scale_video_clip(video_list, window_size, fps):
     clip_scale_proc_dict = {}
     for video in video_list:
-        outfile = video + '.' + str(keep_audio) + '.scale.mp4'
+        outfile = video + '.scale.mp4'
 
         if not os.path.exists(outfile):
             print('scale video:', video)
-            cmd_string = util.splice_scale_cmd_string(video, outfile, window_size, fps, keep_audio)
+            cmd_string = util.splice_scale_cmd_string(video, outfile, window_size, fps)
         else:
             cmd_string = ['true']
 
@@ -214,9 +214,12 @@ def wait_proc_and_add_silent_audio(clip_starttime_list, clip_scale_proc_dict, ke
         p, clip = clip_scale_proc_dict[clip]
         p.stdin.close(); p.wait()
 
-        new_clip_starttime_list.append((clip, starttime))
+        if keep_audio and not util.exists_audio(clip):
+            new_clip = clip + '.silent.mp4'
+            if not os.path.exists(new_clip): ffmpeg_add_silent_audio(clip, outfile=new_clip)
+            clip = new_clip
 
-        if keep_audio and not util.exists_audio(clip): ffmpeg_add_silent_audio(clip)
+        new_clip_starttime_list.append((clip, starttime))
 
     return new_clip_starttime_list
 
@@ -280,13 +283,17 @@ def ffmpeg_concat_main_and_clip(main_video, clip_starttime_list, keep_audio, is_
     # os.rename(outfile, main_video)
 
 
-def ffmpeg_add_audio(video_file, audio_file):
-    outfile = video_file + '.audio.mp4'
+def ffmpeg_add_audio(video_file, audio_file, outfile=None):
+    if outfile is None:
+        outfile = video_file + '.audio.mp4'
+        rename = True
+    else:
+        rename = False
 
     cmd_string = util.splice_audio_cmd_string(outfile, video_file, audio_file)
     subprocess.run(cmd_string)
 
-    os.rename(outfile, video_file)
+    if rename: os.rename(outfile, video_file)
 
 
 ffmpeg_add_silent_audio = functools.partial(ffmpeg_add_audio, audio_file=None)
@@ -371,7 +378,7 @@ if is_mars_in_china: positions = util.fix_mars_in_china(positions)
 photo_render = util.PhotoRender(args.photo, timestamps, positions, is_mars_in_china, args.is_release)
 photo_render.debug()
 
-clip_scale_proc_dict = scale_video_clip(photo_render.videos(), args.size, args.fps, args.keep_audio)
+clip_scale_proc_dict = scale_video_clip(photo_render.videos(), args.size, args.fps)
 
 
 # sys.exit(1)
