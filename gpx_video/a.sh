@@ -28,7 +28,7 @@ provider=gaode-map
 # provider=stamen-toner
 # provider=stamen-toner-lite
 
-audio_file=`find ./audio/ -type f -name *.mp3 | shuf | tail -n1`
+audio_file=`find -L ./audio/ -type f -name *.mp3 | shuf | tail -n1`
 
 ./gpx_to_route.py "$@" -s $width $height -p $provider --audio "$audio_file" --photo ./p.txt $gpx_file "$outfile"
 # ./gpx_to_route.py "$@" --auto-orientation -s $width $height -p $provider --audio "$audio_file" --photo ./p.txt $gpx_file "$outfile"

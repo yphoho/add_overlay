@@ -14,24 +14,28 @@ import bz2
 import gzip
 import lzma
 
+import util
+
 
 class Session(object):
-    def __init__(self, dt, total_distance, total_elapsed_time, total_moving_time, max_speed, avg_speed):
+    def __init__(self, dt, start_time, total_elapsed_time, total_moving_time, total_distance=0.0, max_speed=0.0, avg_speed=0.0):
         self.dt = dt
-        self.total_distance = total_distance / 1000
+        self.start_time = start_time
         self.total_elapsed_time = total_elapsed_time / 3600
         self.total_moving_time = total_moving_time / 3600
+        self.total_distance = total_distance / 1000
         self.max_speed = max_speed * 3.6
         self.avg_speed = avg_speed * 3.6
 
     def __str__(self):
-        return f'datetime:{self.dt}, total_distance:{self.total_distance}, total_elapsed_time:{self.total_elapsed_time}, total_moving_time:{self.total_moving_time}, max_speed:{self.max_speed}, avg_speed:{self.avg_speed}'
+        return f'datetime:{self.dt}, start_time:{self.start_time}, total_elapsed_time:{self.total_elapsed_time}, total_moving_time:{self.total_moving_time}, total_distance:{self.total_distance}, max_speed:{self.max_speed}, avg_speed:{self.avg_speed}'
 
     def merge(self, b):
-        self.dt = min(self.dt, b.dt)
-        self.total_distance += b.total_distance
+        self.dt = max(self.dt, b.dt)
+        self.start_time = min(self.start_time, b.start_time)
         self.total_elapsed_time += b.total_elapsed_time
         self.total_moving_time += b.total_moving_time
+        self.total_distance += b.total_distance
         self.max_speed = max(self.max_speed, b.max_speed)
         self.avg_speed = self.total_distance / self.total_moving_time
 
@@ -62,15 +66,15 @@ def load_gps_data(filepath_list):
     for filepath in filepath_list:
         suffix = Path(filepath).suffix.lower()
         if suffix == ".gpx":
-            t, p = load_gpx_file(filepath)
+            t, p, sess = load_gpx_file(filepath)
         elif suffix == ".fit":
             t, p, sess = load_fit_file(filepath)
-            sess_list.append(sess)
         else:
             fatal(f"Don't recognise filetype from {filepath} - support .gpx and .fit")
 
         timestamp.extend(t)
         positions.extend(p)
+        sess_list.append(sess)
 
     sess = Session.merge_session(sess_list)
 
@@ -125,7 +129,14 @@ def load_gpx_file(filename):
                     lat.append(point.latitude)
                     alt.append(point.elevation)
 
-    return timestamp, zip(lon, lat)
+    tz = util.get_tz(lon[0], lat[0])
+
+    start_dt, end_dt = timestamp[0].astimezone(tz), timestamp[-1].astimezone(tz)
+    total_elapsed_time = (end_dt - start_dt).seconds
+
+    session = Session(end_dt, start_dt, total_elapsed_time, total_elapsed_time)
+
+    return timestamp, zip(lon, lat), session
 
 
 def load_fit_file(filename):
@@ -136,6 +147,7 @@ def load_fit_file(filename):
     timestamp, lon, lat, alt = [], [], [], []
     speed, distance, cadence = [], [], []
     session = None
+    tz = None
 
     ff = FitFile.from_file(filename)
     for record in ff.records:
@@ -143,7 +155,9 @@ def load_fit_file(filename):
         if isinstance(message, RecordMessage):
             if message.position_long is None: continue
 
-            timestamp.append(datetime.fromtimestamp(message.timestamp//1000).astimezone())
+            if tz is None: tz = util.get_tz(message.position_long, message.position_lat)
+
+            timestamp.append(datetime.fromtimestamp(message.timestamp//1000).astimezone(tz))
             lon.append(message.position_long)
             lat.append(message.position_lat)
             alt.append(message.altitude)
@@ -152,7 +166,9 @@ def load_fit_file(filename):
             distance.append(message.distance)
             cadence.append(message.cadence)
         elif isinstance(message, SessionMessage):
-            session = Session(datetime.fromtimestamp(message.timestamp//1000).astimezone(), message.total_distance, message.total_elapsed_time, message.total_moving_time, message.max_speed, message.avg_speed)
+            session = Session(datetime.fromtimestamp(message.timestamp//1000).astimezone(tz),
+                    datetime.fromtimestamp(message.start_time//1000).astimezone(tz),
+                    message.total_elapsed_time, message.total_moving_time, message.total_distance, message.max_speed, message.avg_speed)
 
     # print(session)
 

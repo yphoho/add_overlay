@@ -4,10 +4,13 @@
 import sys
 import os
 
-from collections import defaultdict, namedtuple
-from datetime import datetime, timedelta
-
 from pathlib import Path
+from collections import defaultdict, namedtuple
+
+from datetime import datetime, timedelta
+import pytz
+
+import requests
 
 import subprocess
 
@@ -15,6 +18,19 @@ from geopy.distance import geodesic
 
 import exif
 from PIL import Image, ImageOps
+
+
+def get_tz(lon, lat, username='yang'):
+    ## https://stackoverflow.com/a/16086964/1079820
+    ## https://www.geonames.org/export/web-services.html#timezone
+    # http://api.geonames.org/timezoneJSON?lat=47.01&lng=10.2&username=yang
+
+    print('get timezone online...')
+
+    r = requests.get(f'http://api.geonames.org/timezoneJSON?lat={lat}&lng={lon}&username={username}')
+    print(r.json())
+
+    return pytz.timezone(r.json()['timezoneId'])
 
 
 def wgs2gcj(lon, lat):
@@ -228,20 +244,18 @@ class PhotoRender(object):
                 if pi.is_video:
                     yield pi.photo_name
 
-    def draw_camera_icon(self, mm, map_image, icon='./icon/c3.png', icon_video='./icon/c1.png', icon_size=(60, 60)):
-        bg = Image.new('RGBA', map_image.size)
-        im = ImageOps.contain(Image.open(icon), icon_size)
+    def draw_camera_icon(self, mm, map_image, icon_photo='./icon/c3.png', icon_video='./icon/c1.png', icon_size=(60, 60)):
+        im_photo = ImageOps.contain(Image.open(icon_photo), icon_size)
         im_video = ImageOps.contain(Image.open(icon_video), icon_size)
 
-        for photo_info_list in self.photo_location_dict.values():
-            for photo_info in photo_info_list:
-                x, y = mm.rev_geocode((photo_info.lon, photo_info.lat))
-                if photo_info.is_video:
-                    bg.paste(im_video, (int(x-im_video.size[0]/2), int(y-im_video.size[1]/2)))
-                else:
-                    bg.paste(im, (int(x-im.size[0]/2), int(y-im.size[1]/2)))
+        for photo_info in sorted([x for xx in self.photo_location_dict.values() for x in xx], key=lambda a: a.dt):
+            bg = Image.new('RGBA', map_image.size)
 
-        map_image.alpha_composite(bg)
+            im = im_video if photo_info.is_video else im_photo
+            x, y = mm.rev_geocode((photo_info.lon, photo_info.lat))
+            bg.paste(im, (int(x-im.width//2), int(y-im.height//2)))
+
+            map_image.alpha_composite(bg)
 
     def debug(self):
         for x in self.photo_info_list: print(x)

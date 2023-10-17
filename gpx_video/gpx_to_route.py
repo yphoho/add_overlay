@@ -118,7 +118,7 @@ def rotate_image(image, current_p, i):
 
 
 def draw_gauge(im, sess):
-    if sess is None: return im
+    if sess.total_distance == 0: return im
 
     hour = int(sess.total_moving_time)
     minute = int((sess.total_moving_time - hour) * 60)
@@ -142,6 +142,34 @@ def draw_gauge(im, sess):
         draw.text((x, y), text, fill=(0, 0, 255), font=font)
 
     return im
+
+
+def show_starter(write_counter, im, sess, fps, time_in_sec=3):
+    text_date = sess.start_time.strftime('%B %d, %Y')
+
+    text_begin_time = sess.start_time.strftime('%H:%M:%S')
+    text_end_time = sess.dt.strftime('%H:%M:%S')
+    text_time = '%s -- %s' % (text_begin_time, text_end_time)
+
+    print(text_date, text_time)
+
+    im = im.copy()
+    draw = ImageDraw.Draw(im)
+
+    font = ImageFont.truetype('./font/Gidole-Regular.ttf', size=40)
+    box = font.getbbox(text_time) # wowowowo, getbox not deal with '\n'
+    # print(box)
+
+    x = (im.width // 3) - ((box[2] - box[0]) // 2)
+    y = (im.height // 3) - ((box[3] - box[1]) // 2)
+
+    for i in range(fps * time_in_sec):
+        if i == int(fps * 0.5):
+            draw.multiline_text((x, y), text_date, fill=(0, 0, 255), font=font, spacing=15)
+        elif i == int(fps * 1.2):
+            draw.multiline_text((x, y), text_date + '\n' + text_time, fill=(0, 0, 255), font=font, spacing=15)
+
+        write_counter.write(im.tobytes())
 
 
 def show_full_route(writer, mm, map_image, extent, window_size, current_p, sess, time_in_sec=3):
@@ -402,20 +430,21 @@ cmd_string = util.splice_main_cmd_string(args.output, args.size, args.fps, args.
 p = subprocess.Popen(cmd_string, stdin=subprocess.PIPE)
 write_counter = WriteCounter(p.stdin)
 
+line_width = 5
 clip_starttime_list = []
 for i, dt in enumerate(timestamps):
     if i == 0:
         plots = [mm.rev_geocode(positions[i]), mm.rev_geocode(positions[i])]
     else:
         plots = [mm.rev_geocode(positions[i-1]), mm.rev_geocode(positions[i])]
-
-    line_width = 5
-    draw.line(plots, fill=(255, 0, 0), width=line_width)
+        draw.line(plots, fill=(255, 0, 0), width=line_width)
 
     # center_point = plots[1]
     center_point = smooth_center(mm.rev_geocode, positions, i)
     p1, p2 = view_window(args.size, map_image.size, center_point)
     image_view = map_image.crop((p1[0], p1[1], p2[0], p2[1]))
+
+    if i == 0: show_starter(write_counter, image_view, sess, args.fps)
 
     new_plot_1 = (plots[1][0] - p1[0], plots[1][1] - p1[1])
 
