@@ -18,24 +18,28 @@ import util
 
 
 class Session(object):
-    def __init__(self, dt, start_time, total_elapsed_time, total_moving_time, total_distance=0.0, max_speed=0.0, avg_speed=0.0):
+    def __init__(self, dt, start_time, total_elapsed_time, total_moving_time, total_distance=0.0, total_ascent=0.0, max_speed=0.0, avg_speed=0.0):
         self.dt = dt
         self.start_time = start_time
         self.total_elapsed_time = total_elapsed_time / 3600
         self.total_moving_time = total_moving_time / 3600
+
         self.total_distance = total_distance / 1000
+        self.total_ascent = total_ascent
         self.max_speed = max_speed * 3.6
         self.avg_speed = avg_speed * 3.6
 
     def __str__(self):
-        return f'datetime:{self.dt}, start_time:{self.start_time}, total_elapsed_time:{self.total_elapsed_time}, total_moving_time:{self.total_moving_time}, total_distance:{self.total_distance}, max_speed:{self.max_speed}, avg_speed:{self.avg_speed}'
+        return f'datetime:{self.dt}, start_time:{self.start_time}, total_elapsed_time:{self.total_elapsed_time}, total_moving_time:{self.total_moving_time}, total_distance:{self.total_distance}, total_ascent:{self.total_ascent}, max_speed:{self.max_speed}, avg_speed:{self.avg_speed}'
 
     def merge(self, b):
         self.dt = max(self.dt, b.dt)
         self.start_time = min(self.start_time, b.start_time)
         self.total_elapsed_time += b.total_elapsed_time
         self.total_moving_time += b.total_moving_time
+
         self.total_distance += b.total_distance
+        self.total_ascent += b.total_ascent
         self.max_speed = max(self.max_speed, b.max_speed)
         self.avg_speed = self.total_distance / self.total_moving_time
 
@@ -153,7 +157,7 @@ def load_fit_file(filename):
     for record in ff.records:
         message = record.message
         if isinstance(message, RecordMessage):
-            if message.position_long is None: continue
+            if message.position_long is None or message.position_long > 179.9999: continue
 
             if tz is None: tz = util.get_tz(message.position_long, message.position_lat)
 
@@ -168,7 +172,8 @@ def load_fit_file(filename):
         elif isinstance(message, SessionMessage):
             session = Session(datetime.fromtimestamp(message.timestamp//1000).astimezone(tz),
                     datetime.fromtimestamp(message.start_time//1000).astimezone(tz),
-                    message.total_elapsed_time, message.total_moving_time, message.total_distance, message.max_speed, message.avg_speed)
+                    message.total_elapsed_time, message.total_moving_time,
+                    message.total_distance, message.total_ascent, message.max_speed, message.avg_speed)
 
     # print(session)
 

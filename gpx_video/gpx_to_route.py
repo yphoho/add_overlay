@@ -4,12 +4,16 @@
 import sys
 import os
 
+import math
+
 import shutil
 import pathlib
 import argparse
 import functools
 
 import subprocess
+
+from geopy.distance import geodesic
 
 import geotiler
 
@@ -32,7 +36,7 @@ class WriteCounter(object):
         return self.frame_num
 
 
-def my_render_map(is_cache=True):
+def my_render_map(cache_dir=pathlib.Path('./'), cache_file='tilecache.sqlite', is_cache=True):
     if not is_cache:
         return geotiler.render_map
 
@@ -51,12 +55,12 @@ def my_render_map(is_cache=True):
 
         return functools.partial(caching_downloader, get_key, set_key, fetch_tiles)
 
-    db = SqliteDict(filename=str(args.cache_dir.joinpath("tilecache.sqlite")), autocommit=True)
+    db = SqliteDict(filename=str(cache_dir.joinpath(cache_file)), autocommit=True)
     downloader = sqlite_downloader(db)
     return functools.partial(geotiler.render_map, downloader=downloader)
 
 
-def load_gps_point(filename, fps):
+def load_gps_point(filename, fps, is_mars_in_china):
     timestamps, positions, sess = loading.load_gps_data(filename)
 
     num_p = int(len(positions) / (240 / fps))
@@ -68,6 +72,8 @@ def load_gps_point(filename, fps):
     new_timestamps.append(timestamps[-1])
 
     print('origin gps num:%d, used gps num:%d' % (len(positions), len(new_positions)))
+
+    if is_mars_in_china: new_positions = util.fix_mars_in_china(new_positions)
 
     return new_timestamps, new_positions, sess
 
@@ -91,6 +97,12 @@ def init_map_object(positions, auto_orientation, video_size, zoom, provider):
     x, y = zip(*positions)
     extent = min(x), min(y), max(x), max(y)
 
+    if zoom == 0:
+        distance = geodesic((extent[1], extent[0]), (extent[3], extent[2])).km
+        print('max distance: ', distance)
+
+        zoom = 14 if distance > 7.0 else 15
+
     if auto_orientation:
         if (extent[2] - extent[0]) > (extent[3] - extent[1]):
             # landscape
@@ -100,46 +112,61 @@ def init_map_object(positions, auto_orientation, video_size, zoom, provider):
             video_size = (min(video_size), max(video_size))
 
     mm = geotiler.Map(extent=extent, zoom=zoom, provider=provider)
-    mm = geotiler.Map(size=(mm.size[0]+video_size[0], mm.size[1]+video_size[1]), extent=extent, provider=provider)
-    if mm.zoom > 18: # FIXME: max zoom in API missing
-        mm = geotiler.Map(extent=extent, zoom=18)
+
+    # mm = geotiler.Map(size=(mm.size[0]+video_size[0], mm.size[1]+video_size[1]), extent=extent, provider=provider)
+    mm.size = max(video_size[0], mm.size[0]+video_size[0]//2), max(video_size[1], mm.size[1]+video_size[1]//2)
 
     print('map size:', mm.size, ', map zoom:', mm.zoom, ', map extent:', mm.extent)
 
     return mm, extent, video_size
 
 
-def rotate_image(image, current_p, i):
+def rotate_image(image, current_p, i, fps):
     return image
 
-    image_rotated = image.rotate((i*2/args.fps) % 360, center=current_p)
+    image_rotated = image.rotate((i*2/fps) % 360, center=current_p)
 
     return image_rotated
+
+
+def find_best_font(text, window_size, align='center', font_file='./font/Gidole-Regular.ttf'):
+    align_list = ('center', '1/3')
+
+    if align not in align_list: align = align_list[0]
+
+    text = max([(len(x), x) for x in text.split('\n')])[1]
+
+    if align == '1/3':
+        size = int(window_size[0] * 2 / len(text) * 0.67)
+    else:
+        size = int(window_size[0] * 2 / len(text) * 0.9)
+    print('font size:', size)
+
+    font = ImageFont.truetype(font_file, size=size)
+
+    return font
 
 
 def draw_gauge(im, sess):
     if sess.total_distance == 0: return im
 
     hour = int(sess.total_moving_time)
-    minute = int((sess.total_moving_time - hour) * 60)
-    text = 'distance: %.1f km, time: %dh%dm, speed: %.1f km/h' %  (sess.total_distance, hour, minute, sess.avg_speed)
+    minute = math.ceil((sess.total_moving_time - hour) * 60)
+    time_text = '%dh%dm' % (hour, minute) if hour != 0 else '%dm' % minute
+    text = 'distance: %.1f km, elevation: %d m\ntime: %s, speed: %.1f km/h' %  (sess.total_distance, sess.total_ascent, time_text, sess.avg_speed)
+    if im.width < im.height: text = text.replace(', ', '\n')
 
-    font = ImageFont.truetype('./font/Gidole-Regular.ttf', size=30)
-    l = font.getlength(text)
+    if not hasattr(draw_gauge, 'font'):
+        draw_gauge.font = find_best_font(text, im.size)
+    text_spacing = draw_gauge.font.size // 3
 
     draw = ImageDraw.Draw(im)
-    if l > im.width:
-        text = text.replace(', ', '\n')
+    box = draw.textbbox((0, 0), text, draw_gauge.font, spacing=text_spacing)
 
-        x = im.width // 4
-        y = im.height // 5
+    x = (im.width // 2) - ((box[2] - box[0]) // 2)
+    y = (im.height // 3) - ((box[3] - box[1]) // 2)
 
-        draw.multiline_text((x, y), text, fill=(0, 0, 255), font=font)
-    else:
-        x = (im.width - l) // 2
-        y = im.height // 10
-
-        draw.text((x, y), text, fill=(0, 0, 255), font=font)
+    draw.text((x, y), text, fill=(0, 0, 255), font=draw_gauge.font, spacing=text_spacing)
 
     return im
 
@@ -151,29 +178,32 @@ def show_starter(write_counter, im, sess, fps, time_in_sec=3):
     text_end_time = sess.dt.strftime('%H:%M:%S')
     text_time = '%s -- %s' % (text_begin_time, text_end_time)
 
+    full_text = text_date + '\n' + text_time
+
     print(text_date, text_time)
 
     im = im.copy()
     draw = ImageDraw.Draw(im)
 
-    font = ImageFont.truetype('./font/Gidole-Regular.ttf', size=40)
-    box = font.getbbox(text_time) # wowowowo, getbox not deal with '\n'
-    # print(box)
+    font = find_best_font(full_text, im.size, '1/3')
+    text_spacing = font.size // 3
+
+    box = draw.textbbox((0, 0), full_text, font, spacing=text_spacing)
 
     x = (im.width // 3) - ((box[2] - box[0]) // 2)
     y = (im.height // 3) - ((box[3] - box[1]) // 2)
 
     for i in range(fps * time_in_sec):
-        if i == int(fps * 0.5):
-            draw.multiline_text((x, y), text_date, fill=(0, 0, 255), font=font, spacing=15)
-        elif i == int(fps * 1.2):
-            draw.multiline_text((x, y), text_date + '\n' + text_time, fill=(0, 0, 255), font=font, spacing=15)
+        if i == int(fps * 0.3):
+            draw.text((x, y), text_date, fill=(0, 0, 255), font=font, spacing=text_spacing)
+        elif i == int(fps * 1.0):
+            draw.text((x, y), full_text, fill=(0, 0, 255), font=font, spacing=text_spacing)
 
         write_counter.write(im.tobytes())
 
 
-def show_full_route(writer, mm, map_image, extent, window_size, current_p, sess, time_in_sec=3):
-    num_frame = int(args.fps * time_in_sec)
+def show_full_route(writer, mm, map_image, extent, window_size, fps, current_p, sess, time_in_sec=3):
+    num_frame = int(fps * time_in_sec)
 
     p1, p2 = mm.rev_geocode((extent[0], extent[1])), mm.rev_geocode((extent[2], extent[3]))
 
@@ -190,8 +220,8 @@ def show_full_route(writer, mm, map_image, extent, window_size, current_p, sess,
     y_per_frame = (mid[1]-current_p[1]) / num_frame
 
     for i in range(1, num_frame+1):
-        box_width = args.size[0] * (1 + r_per_frame * i)
-        box_height = args.size[1] * (1 + r_per_frame * i)
+        box_width = window_size[0] * (1 + r_per_frame * i)
+        box_height = window_size[1] * (1 + r_per_frame * i)
 
         new_current_p = (current_p[0] + x_per_frame * i, current_p[1] + y_per_frame * i)
 
@@ -202,6 +232,8 @@ def show_full_route(writer, mm, map_image, extent, window_size, current_p, sess,
         image_view = draw_gauge(image_view, sess)
 
         writer.write(image_view.tobytes())
+
+    for i in range(2 * fps): writer.write(image_view.tobytes())
 
 
 def smooth_center(rev_geocode, location_list, i, window2=7):
@@ -216,13 +248,64 @@ def smooth_center(rev_geocode, location_list, i, window2=7):
     return (x, y)
 
 
+def render_route(output, window_size, fps, extent, mm, map_image, positions, timestamps, sess, is_release):
+    cmd_string = util.splice_main_cmd_string(output, window_size, fps, is_release)
+
+    p = subprocess.Popen(cmd_string, stdin=subprocess.PIPE)
+    write_counter = WriteCounter(p.stdin)
+
+    draw = ImageDraw.Draw(map_image)
+
+    line_width = 5
+    clip_starttime_list = []
+    for i, dt in enumerate(timestamps):
+        if i == 0:
+            plots = [mm.rev_geocode(positions[i]), mm.rev_geocode(positions[i])]
+        else:
+            plots = [mm.rev_geocode(positions[i-1]), mm.rev_geocode(positions[i])]
+            draw.line(plots, fill=(255, 0, 0), width=line_width)
+
+        # center_point = plots[1]
+        center_point = smooth_center(mm.rev_geocode, positions, i)
+        p1, p2 = view_window(window_size, map_image.size, center_point)
+        image_view = map_image.crop((p1[0], p1[1], p2[0], p2[1]))
+
+        if i == 0: show_starter(write_counter, image_view, sess, fps)
+
+        new_plot_1 = (plots[1][0] - p1[0], plots[1][1] - p1[1])
+
+        new_draw = ImageDraw.Draw(image_view)
+        x, y = new_plot_1
+        new_draw.ellipse((x-line_width, y-line_width, x+line_width, y+line_width), fill=(255, 255, 255))
+
+        # image_view = rotate_image(image_view, new_plot_1, i, fps)
+
+        write_counter.write(image_view.tobytes())
+
+        photo_info_list = photo_render.render_photo_if_need(p.stdin, write_counter, window_size, dt, fps)
+
+        clip_starttime_list.extend([(pi.photo_name, write_counter.current_frame_num()/fps) for pi in photo_info_list if pi.is_video])
+
+    show_full_route(write_counter, mm, map_image, extent, window_size, fps, plots[1], sess)
+
+    print('frame num:', write_counter.current_frame_num())
+
+    # p.stdin.flush()
+    p.stdin.close(); p.wait()
+
+    map_image.save(output+'.png')
+    shutil.copy2(output, output+'.route.mp4')
+
+    return clip_starttime_list
+
+
 def scale_video_clip(video_list, window_size, fps):
     clip_scale_proc_dict = {}
     for video in video_list:
-        outfile = video + '.scale.mp4'
+        outfile = video + '.' + str(window_size) + '.scale.mp4'
 
         if not os.path.exists(outfile):
-            print('scale video:', video)
+            print('scale clip:', video)
             cmd_string = util.splice_scale_cmd_string(video, outfile, window_size, fps)
         else:
             cmd_string = ['true']
@@ -254,8 +337,6 @@ def wait_proc_and_add_silent_audio(clip_starttime_list, clip_scale_proc_dict, ke
 
 def ffmpeg_concat_main_and_clip(main_video, clip_starttime_list, keep_audio, is_release):
     if not clip_starttime_list: return
-
-    print('concat video...')
 
     clip_list, filter_complex = [], []
     inpoint = 0.0
@@ -361,7 +442,7 @@ parser.add_argument(
     help='swap the size by the shape of route automatically'
 )
 parser.add_argument(
-    '-z', '--zoom', dest='zoom', type=int, default=14,
+    '-z', '--zoom', dest='zoom', type=int, default=0,
     help='zoom of map'
 )
 parser.add_argument(
@@ -387,21 +468,11 @@ args = parser.parse_args()
 
 args.cache_dir.mkdir(parents=True, exist_ok=True)
 
-#
-# read positions and determine map extents
-#
+provider = geotiler.provider.find_provider(args.provider)
+is_mars_in_china = provider.name.endswith('.mars_in_china')
+
 print('load gps data...')
-timestamps, positions, sess = load_gps_point(args.filename, args.fps)
-
-#
-# render map image
-#
-
-mm, extent, args.size = init_map_object(positions, args.auto_orientation, args.size, args.zoom, args.provider)
-
-is_mars_in_china = mm.provider.name.endswith('.mars_in_china')
-
-if is_mars_in_china: positions = util.fix_mars_in_china(positions)
+timestamps, positions, sess = load_gps_point(args.filename, args.fps, is_mars_in_china)
 
 photo_render = util.PhotoRender(args.photo, timestamps, positions, is_mars_in_china, args.is_release)
 photo_render.debug()
@@ -413,67 +484,19 @@ clip_scale_proc_dict = scale_video_clip(photo_render.videos(), args.size, args.f
 
 
 print('render_map...')
-map_image = my_render_map()(mm)
-
-draw = ImageDraw.Draw(map_image)
+mm, extent, args.size = init_map_object(positions, args.auto_orientation, args.size, args.zoom, provider)
+map_image = my_render_map(args.cache_dir)(mm)
 
 photo_render.draw_camera_icon(mm, map_image)
 
-#
-# render positions
-#
-
 print('render route...')
-
-cmd_string = util.splice_main_cmd_string(args.output, args.size, args.fps, args.is_release)
-
-p = subprocess.Popen(cmd_string, stdin=subprocess.PIPE)
-write_counter = WriteCounter(p.stdin)
-
-line_width = 5
-clip_starttime_list = []
-for i, dt in enumerate(timestamps):
-    if i == 0:
-        plots = [mm.rev_geocode(positions[i]), mm.rev_geocode(positions[i])]
-    else:
-        plots = [mm.rev_geocode(positions[i-1]), mm.rev_geocode(positions[i])]
-        draw.line(plots, fill=(255, 0, 0), width=line_width)
-
-    # center_point = plots[1]
-    center_point = smooth_center(mm.rev_geocode, positions, i)
-    p1, p2 = view_window(args.size, map_image.size, center_point)
-    image_view = map_image.crop((p1[0], p1[1], p2[0], p2[1]))
-
-    if i == 0: show_starter(write_counter, image_view, sess, args.fps)
-
-    new_plot_1 = (plots[1][0] - p1[0], plots[1][1] - p1[1])
-
-    new_draw = ImageDraw.Draw(image_view)
-    x, y = new_plot_1
-    new_draw.ellipse((x-line_width, y-line_width, x+line_width, y+line_width), fill=(255, 255, 255))
-
-    # image_view = rotate_image(image_view, new_plot_1, i)
-
-    write_counter.write(image_view.tobytes())
-
-    photo_info_list = photo_render.render_photo_if_need(p.stdin, write_counter, args.size, dt, args.fps)
-
-    clip_starttime_list.extend([(pi.photo_name, write_counter.current_frame_num()/args.fps) for pi in photo_info_list if pi.is_video])
-
-show_full_route(write_counter, mm, map_image, extent, args.size, plots[1], sess)
-
-print('frame num:', write_counter.current_frame_num())
-
-# p.stdin.flush()
-p.stdin.close(); p.wait()
-
-map_image.save(args.output+'.png')
-
-shutil.copy2(args.output, args.output+'.route.mp4')
+clip_starttime_list = render_route(args.output, args.size, args.fps, extent, mm, map_image, positions, timestamps, sess, args.is_release)
 
 if args.keep_audio: ffmpeg_add_audio(args.output, args.audio)
 
+print('wait scale...')
 new_clip_starttime_list = wait_proc_and_add_silent_audio(clip_starttime_list, clip_scale_proc_dict, args.keep_audio)
 
+print('concat clips...')
 ffmpeg_concat_main_and_clip(args.output, new_clip_starttime_list, args.keep_audio, args.is_release)
 if not args.keep_audio and args.audio: ffmpeg_add_audio(args.output, args.audio)
