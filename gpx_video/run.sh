@@ -10,7 +10,7 @@ gpx_file=haihedonglu.fit
 # gpx_file=tuanpohu.fit
 # gpx_file=miaofengshan.gpx
 
-outfile="../gopro/$gpx_file.mp4"
+outfile="./gopro/$gpx_file.mp4"
 
 if [ $# -gt 0 ]; then
     make clean target=$outfile

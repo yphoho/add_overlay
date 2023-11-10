@@ -106,10 +106,10 @@ def init_map_object(positions, auto_orientation, video_size, zoom, provider):
     if auto_orientation:
         if (extent[2] - extent[0]) > (extent[3] - extent[1]):
             # landscape
-            video_size = (max(video_size), min(video_size))
+            video_size = [max(video_size), min(video_size)]
         else:
             # portrait
-            video_size = (min(video_size), max(video_size))
+            video_size = [min(video_size), max(video_size)]
 
     mm = geotiler.Map(extent=extent, zoom=zoom, provider=provider)
 
@@ -477,14 +477,9 @@ timestamps, positions, sess = load_gps_point(args.filename, args.fps, is_mars_in
 photo_render = util.PhotoRender(args.photo, timestamps, positions, is_mars_in_china, args.is_release)
 photo_render.debug()
 
-clip_scale_proc_dict = scale_video_clip(photo_render.videos(), args.size, args.fps)
-
-
-# sys.exit(1)
-
-
 print('render_map...')
 mm, extent, args.size = init_map_object(positions, args.auto_orientation, args.size, args.zoom, provider)
+clip_scale_proc_dict = scale_video_clip(photo_render.videos(), args.size, args.fps)
 map_image = my_render_map(args.cache_dir)(mm)
 
 photo_render.draw_camera_icon(mm, map_image)

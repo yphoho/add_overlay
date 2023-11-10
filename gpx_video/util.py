@@ -309,11 +309,22 @@ class PhotoRender(object):
         with open(photo, 'rb') as image_file:
             my_image = exif.Image(image_file)
 
-        if not 'gps_longitude' in my_image.list_all(): return None
+        if not my_image.has_exif: return None
 
-        dt = datetime.strptime(my_image.datetime+my_image.offset_time.replace(':', ''), '%Y:%m:%d %H:%M:%S%z')
-        lon = float(sum([x / (60 ** i) for i, x in enumerate(my_image.gps_longitude)]))
-        lat = float(sum([x / (60 ** i) for i, x in enumerate(my_image.gps_latitude)]))
+        if my_image.get('datetime') is not None and my_image.get('offset_time') is not None:
+            dt_string = my_image.datetime + my_image.offset_time.replace(':', '')
+        elif my_image.get('gps_datestamp') is not None and my_image.get('gps_timestamp') is not None:
+            dt_string = my_image.gps_datestamp + ' ' + '%02d:%02d:%02d' % my_image.gps_timestamp + 'Z'
+        else:
+            return None
+
+        dt = datetime.strptime(dt_string, '%Y:%m:%d %H:%M:%S%z')
+
+        if my_image.get('gps_longitude') is None or my_image.get('gps_latitude') is None:
+            lon, lat = None, None
+        else:
+            lon = float(sum([x / (60 ** i) for i, x in enumerate(my_image.gps_longitude)]))
+            lat = float(sum([x / (60 ** i) for i, x in enumerate(my_image.gps_latitude)]))
 
         return dt, lon, lat
 
